@@ -65,43 +65,50 @@ video_fps = int(vid.get(5))
 fourcc = cv2.VideoWriter_fourcc('m', 'p', '4', 'v')
 videoWriter = cv2.VideoWriter('video_result.mp4', fourcc, video_fps, (video_width, video_height))
 
+graph = tf.Graph()
+INPUT_TENSOR_NAME = 'ImageTensor:0'
+OUTPUT_TENSOR_NAME = 'SemanticPredictions:0'
+graph_def = None
+graph_path = "exp/eval/frozen_inference_graph.pb"
+with tf.gfile.FastGFile(graph_path, 'rb') as f:
+    graph_def = tf.GraphDef()
+    graph_def.ParseFromString(f.read())
 
-# 加载模型
-with tf.Session() as sess:
-    with open("exp/eval/frozen_inference_graph.pb", "rb") as f:
-        graph_def = tf.GraphDef()
-        graph_def.ParseFromString(f.read())
+if graph_def is None:
+    raise RuntimeError('Cannot find inference graph in tar archive.')
 
-    for i in range(video_frame_cnt):
-        ret, img_ori = vid.read()
+with graph.as_default():
+    tf.import_graph_def(graph_def, name='')
 
-        if ret == False:
-            break
-        #img = img_ori.resize((2048, 1024))
-        img = cv2.resize(img_ori, (2048, 1024))
-        img = img_to_array(img)
-        img = np.expand_dims(img, axis=0).astype(np.uint8)  # uint8是之前导出模型时定义的
+sess = tf.Session(graph=graph)
 
-        output = tf.import_graph_def(graph_def, input_map={"ImageTensor:0": img},
-                                    return_elements=["SemanticPredictions:0"])
-        # input_map 就是指明 输入是什么；
-        # return_elements 就是指明输出是什么；两者在前面已介绍
 
-        result = sess.run(output)
-        # print(result[0].shape)
-        result[0].shape = (result[0].shape[1], result[0].shape[2])
+for i in range(video_frame_cnt):
+    ret, img_ori = vid.read()
 
-        pre = result[0].astype(np.uint8)
-        pre = create_visual_anno(pre)
-        # print(pre.dtype)  # (1, height, width)
+    if ret == False:
+        break
+    #img = img_ori.resize((2048, 1024))
+    img = cv2.resize(img_ori, (2048, 1024))
+    img = img_to_array(img)
+    img = np.expand_dims(img, axis=0).astype(np.uint8)  # uint8是之前导出模型时定义的
+    result = sess.run(
+        OUTPUT_TENSOR_NAME,
+        feed_dict={INPUT_TENSOR_NAME: img})
+    print(result.shape)
+    result.shape = (result.shape[1], result.shape[2])
 
-        #
-        # cv2.imshow('input', img_ori)
-        pre = cv2.resize(pre, (video_width, video_height))
-        cv2.imshow('output', pre)
-        videoWriter.write(pre)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-        # cv2.waitKey(0)
-    vid.release()
-    videoWriter.release()
+    pre = result.astype(np.uint8)
+    pre = create_visual_anno(pre)
+    # print(pre.dtype)  # (1, height, width)
+
+    #
+    # cv2.imshow('input', img_ori)
+    pre = cv2.resize(pre, (video_width, video_height))
+    cv2.imshow('output', pre)
+    videoWriter.write(pre)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+    # cv2.waitKey(0)
+vid.release()
+videoWriter.release()
